@@ -1,1 +1,4 @@
 # convosense
+
+SUPABASE_URL=https://vvrkayrxvitbizxxroml.supabase.co
+SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2cmtheXJ4dml0Yml6eHhyb21sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5MDc0NDcsImV4cCI6MjA2NzQ4MzQ0N30.J0uQdrHxmtN3-UXVHvBpRCI9psREEmlw-HHyivDTx-I
