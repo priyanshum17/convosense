@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from core.control.database import db, User
+from core.sockets.handlers import socketio 
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -39,18 +40,31 @@ def login():
 
     return jsonify({'message': 'Logged in successfully', 'user_id': user.id}), 200
 
-@auth_bp.route('/delete_user', methods=['DELETE'])
+@auth_bp.route("/delete_user", methods=["DELETE"])
 def delete_user():
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
+    data      = request.get_json()
+    username  = data.get("username")
+    password  = data.get("password")
 
     user = User.query.filter_by(username=username).first()
-
     if not user or not check_password_hash(user.password_hash, password):
-        return jsonify({'message': 'Invalid credentials'}), 401
+        return jsonify({"message": "Invalid credentials"}), 401
 
+    user_id = user.id
     db.session.delete(user)
     db.session.commit()
 
-    return jsonify({'message': 'User deleted successfully'}), 200
+    # let every socket client update its roster
+    socketio.emit("user_deleted", {"user_id": user_id}, broadcast=True)
+
+    return jsonify({"message": "User deleted successfully"}), 200
+
+
+
+@auth_bp.route("/users", methods=["GET"])
+def list_users():
+    """Return every user that currently exists (REST flavour)."""
+    users = User.query.with_entities(User.id, User.username, User.is_active).all()
+    return jsonify(
+        [{"id": u.id, "username": u.username, "is_active": u.is_active} for u in users]
+    ), 200

@@ -1,240 +1,215 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Messaging App Test Interface</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Messaging-App Sandbox</title>
+
+    <!-- Socket.IO v4 client -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
-        div { margin-bottom: 10px; padding: 10px; border: 1px solid #ccc; }
-        input, button { margin-right: 5px; padding: 8px; }
-        #messages, #activeUsers { border: 1px solid #eee; padding: 10px; height: 200px; overflow-y: scroll; }
-        .message { background-color: #f0f0f0; padding: 5px; margin-bottom: 5px; }
-        .active-user { color: green; font-weight: bold; }
-        .inactive-user { color: gray; }
+        section { margin-bottom: 25px; }
+        input, button { padding: 8px; margin-right: 6px; }
+        #messages, #activeUsers, #allUsers { height: 200px; overflow-y: auto;
+                                             border: 1px solid #ddd; padding: 10px; }
+        .message { background:#f5f5f5; margin-bottom:4px; padding:5px; }
+        .sent    { background:#e6ffe6; }                 /* you → others   */
+        .active-user   { color:green;   font-weight:600; }
+        .inactive-user { color:#888; }
+        li { list-style:none; margin-bottom:2px; }
     </style>
 </head>
 <body>
-    <h1>Messaging App Test Interface</h1>
+    <h1>Messaging-App Test Interface</h1>
 
-    <h2>User Authentication</h2>
-    <div>
+    <!-- ░░░░░░ 1. AUTH ░░░░░░ -->
+    <section>
+        <h2>User Authentication</h2>
+
         <h3>Register</h3>
-        <input type="text" id="registerUsername" placeholder="Username">
-        <input type="password" id="registerPassword" placeholder="Password">
+        <input id="registerUsername" placeholder="Username" />
+        <input id="registerPassword" type="password" placeholder="Password" />
         <button onclick="registerUser()">Register</button>
         <p id="registerStatus"></p>
-    </div>
 
-    <div>
         <h3>Login</h3>
-        <input type="text" id="loginUsername" placeholder="Username">
-        <input type="password" id="loginPassword" placeholder="Password">
+        <input id="loginUsername" placeholder="Username" />
+        <input id="loginPassword" type="password" placeholder="Password" />
         <button onclick="loginUser()">Login</button>
         <p id="loginStatus"></p>
         <p>Logged in as: <span id="loggedInUser">None</span> (ID: <span id="loggedInUserId">None</span>)</p>
-    </div>
 
-    <div>
         <h3>Delete User</h3>
-        <input type="text" id="deleteUsername" placeholder="Username">
-        <input type="password" id="deletePassword" placeholder="Password">
+        <input id="deleteUsername" placeholder="Username" />
+        <input id="deletePassword" type="password" placeholder="Password" />
         <button onclick="deleteUser()">Delete</button>
         <p id="deleteStatus"></p>
-    </div>
+    </section>
 
-    <h2>Messaging</h2>
-    <div>
-        <h3>Send Message</h3>
-        <input type="text" id="receiverId" placeholder="Receiver User ID">
-        <input type="text" id="messageContent" placeholder="Message Content">
+    <!-- ░░░░░░ 2. MESSAGING ░░░░░░ -->
+    <section>
+        <h2>Messaging</h2>
+        <input id="receiverId" placeholder="Receiver User-ID" size="10" />
+        <input id="messageContent" placeholder="Message" size="50" />
         <button onclick="sendMessage()">Send</button>
-    </div>
 
-    <div>
         <h3>Messages</h3>
         <div id="messages"></div>
-    </div>
+    </section>
 
-    <h2>Active Users</h2>
-    <div>
-        <button onclick="getActiveUsers()">Refresh Active Users</button>
+    <!-- ░░░░░░ 3. USER LISTS ░░░░░░ -->
+    <section>
+        <h2>Active Users (Socket)</h2>
+        <button onclick="getActiveUsers()">Refresh Active-Only</button>
         <ul id="activeUsers"></ul>
-    </div>
+    </section>
 
+    <section>
+        <h2>All Users (REST / Socket)</h2>
+        <button onclick="getAllUsersREST()">REST /auth/users</button>
+        <button onclick="getAllUsersSocket()">Socket get_all_users</button>
+        <ul id="allUsers"></ul>
+    </section>
+
+    <!-- ░░░░░░ 4. SCRIPT ░░░░░░ -->
     <script>
-        let socket;
+        let socket = null;
         let loggedInUserId = null;
         let loggedInUsername = null;
 
+        /* ───────── Socket helpers ───────── */
         function connectSocket() {
-            if (socket && socket.connected) {
-                socket.disconnect();
-            }
-            const userId = document.getElementById('loggedInUserId').innerText;
-            if (userId && userId !== 'None') {
-                socket = io.connect(window.location.origin, { query: `user_id=${userId}` });
+            if (!loggedInUserId) return;
 
-                socket.on('connect', () => {
-                    console.log('Socket connected!');
-                    getActiveUsers();
+            if (socket?.connected) socket.disconnect();
+
+            socket = io(window.location.origin, { query: `user_id=${loggedInUserId}` });
+
+            socket.on('connect',   ()  => { console.log('socket connected'); getActiveUsers(); getAllUsersSocket(); });
+            socket.on('disconnect',()  => console.log('socket disconnected'));
+
+            socket.on('new_message',  appendIncoming);
+            socket.on('message_sent', appendOutgoing);
+
+            socket.on('user_status', () => getActiveUsers());   // refresh on status flip
+            socket.on('active_users_list', renderActiveUsers);
+
+            socket.on('all_users_list',   renderAllUsers);
+
+            socket.on('user_deleted', ({user_id}) => {
+                // Grey-out in UI for immediate feedback
+                document.querySelectorAll(`[data-uid='${user_id}']`).forEach(li=>{
+                    li.className='inactive-user';
+                    li.innerText = li.innerText.replace('(active)','(deleted)');
                 });
-
-                socket.on('disconnect', () => {
-                    console.log('Socket disconnected!');
-                });
-
-                socket.on('new_message', (data) => {
-                    const messagesDiv = document.getElementById('messages');
-                    const messageElem = document.createElement('div');
-                    messageElem.className = 'message';
-                    messageElem.innerText = `From ${data.sender_id} to ${data.receiver_id} (${new Date(data.timestamp).toLocaleTimeString()}): ${data.content}`;
-                    messagesDiv.appendChild(messageElem);
-                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                });
-
-                socket.on('message_sent', (data) => {
-                    const messagesDiv = document.getElementById('messages');
-                    const messageElem = document.createElement('div');
-                    messageElem.className = 'message';
-                    messageElem.style.backgroundColor = '#e0ffe0'; // Light green for sent messages
-                    messageElem.innerText = `You sent to ${data.receiver_id} (${new Date(data.timestamp).toLocaleTimeString()}): ${data.content}`;
-                    messagesDiv.appendChild(messageElem);
-                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                });
-
-                socket.on('user_status', (data) => {
-                    console.log(`User ${data.user_id} is now ${data.is_active ? 'active' : 'inactive'}`);
-                    getActiveUsers(); // Refresh active users list on status change
-                });
-
-                socket.on('active_users_list', (users) => {
-                    const activeUsersUl = document.getElementById('activeUsers');
-                    activeUsersUl.innerHTML = '';
-                    users.forEach(user => {
-                        const li = document.createElement('li');
-                        li.className = 'active-user';
-                        li.innerText = `${user.username} (ID: ${user.id})`;
-                        activeUsersUl.appendChild(li);
-                    });
-                });
-
-            } else {
-                console.log("Cannot connect socket: No user logged in.");
-            }
+            });
         }
 
-        async function registerUser() {
-            const username = document.getElementById('registerUsername').value;
-            const password = document.getElementById('registerPassword').value;
-            const statusElem = document.getElementById('registerStatus');
+        /* ───────── UI update helpers ───────── */
+        function appendIncoming(d){
+            const box = document.getElementById('messages');
+            const div = document.createElement('div');
+            div.className='message';
+            div.innerText=`From ${d.sender_id} → ${d.receiver_id} (${fmt(d.timestamp)}): ${d.content}`;
+            box.append(div); box.scrollTop=box.scrollHeight;
+        }
+        function appendOutgoing(d){
+            const box = document.getElementById('messages');
+            const div = document.createElement('div');
+            div.className='message sent';
+            div.innerText=`You → ${d.receiver_id} (${fmt(d.timestamp)}): ${d.content}`;
+            box.append(div); box.scrollTop=box.scrollHeight;
+        }
+        function renderActiveUsers(users){
+            const ul=document.getElementById('activeUsers'); ul.innerHTML='';
+            users.forEach(u=>{
+                const li=document.createElement('li');
+                li.className='active-user'; li.dataset.uid=u.id;
+                li.innerText=`${u.username} (ID:${u.id})`;
+                ul.append(li);
+            });
+        }
+        function renderAllUsers(users){
+            const ul=document.getElementById('allUsers'); ul.innerHTML='';
+            users.forEach(u=>{
+                const li=document.createElement('li');
+                li.dataset.uid=u.id;
+                li.className = u.is_active ? 'active-user' : 'inactive-user';
+                li.innerText = `${u.username} (ID:${u.id}) ${u.is_active?'(active)':'(inactive)'}`;
+                ul.append(li);
+            });
+        }
+        const fmt = iso => new Date(iso).toLocaleTimeString();
 
-            try {
-                const response = await fetch('/auth/register', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-                const data = await response.json();
-                statusElem.innerText = data.message;
-                statusElem.style.color = response.ok ? 'green' : 'red';
-            } catch (error) {
-                statusElem.innerText = 'Error registering user.';
-                statusElem.style.color = 'red';
-                console.error('Error:', error);
+        /* ───────── REST helpers ───────── */
+        async function registerUser(){
+            await jsonRequest('/auth/register','POST',{
+                username:val('registerUsername'), password:val('registerPassword')
+            },'registerStatus');
+        }
+        async function loginUser(){
+            const res = await jsonRequest('/auth/login','POST',{
+                username:val('loginUsername'), password:val('loginPassword')
+            },'loginStatus');
+            if(res?.ok){
+                loggedInUserId   = res.data.user_id;
+                loggedInUsername = val('loginUsername');
+                setLoggedInBanner();
+                connectSocket();
             }
         }
-
-        async function loginUser() {
-            const username = document.getElementById('loginUsername').value;
-            const password = document.getElementById('loginPassword').value;
-            const statusElem = document.getElementById('loginStatus');
-
-            try {
-                const response = await fetch('/auth/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-                const data = await response.json();
-                statusElem.innerText = data.message;
-                statusElem.style.color = response.ok ? 'green' : 'red';
-
-                if (response.ok) {
-                    loggedInUserId = data.user_id;
-                    loggedInUsername = username;
-                    document.getElementById('loggedInUser').innerText = loggedInUsername;
-                    document.getElementById('loggedInUserId').innerText = loggedInUserId;
-                    connectSocket(); // Connect socket after successful login
-                } else {
-                    loggedInUserId = null;
-                    loggedInUsername = null;
-                    document.getElementById('loggedInUser').innerText = 'None';
-                    document.getElementById('loggedInUserId').innerText = 'None';
-                    if (socket) socket.disconnect();
-                }
-            } catch (error) {
-                statusElem.innerText = 'Error logging in.';
-                statusElem.style.color = 'red';
-                console.error('Error:', error);
+        async function deleteUser(){
+            const res=await jsonRequest('/auth/delete_user','DELETE',{
+                username:val('deleteUsername'), password:val('deletePassword')
+            },'deleteStatus');
+            if(res?.ok && val('deleteUsername')===loggedInUsername){
+                logoutLocal();
             }
         }
-
-        async function deleteUser() {
-            const username = document.getElementById('deleteUsername').value;
-            const password = document.getElementById('deletePassword').value;
-            const statusElem = document.getElementById('deleteStatus');
-
-            try {
-                const response = await fetch('/auth/delete_user', {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-                const data = await response.json();
-                statusElem.innerText = data.message;
-                statusElem.style.color = response.ok ? 'green' : 'red';
-                if (response.ok && username === loggedInUsername) {
-                    loggedInUserId = null;
-                    loggedInUsername = null;
-                    document.getElementById('loggedInUser').innerText = 'None';
-                    document.getElementById('loggedInUserId').innerText = 'None';
-                    if (socket) socket.disconnect();
-                }
-            } catch (error) {
-                statusElem.innerText = 'Error deleting user.';
-                statusElem.style.color = 'red';
-                console.error('Error:', error);
-            }
+        async function getAllUsersREST(){
+            try{
+                const r = await fetch('/auth/users'); const d = await r.json();
+                renderAllUsers(d);
+            }catch(e){ console.error(e); }
+        }
+        /* ───────── Socket emits ───────── */
+        function sendMessage(){
+            if(!socket?.connected) return alert('Login first!');
+            socket.emit('message',{
+                sender_id:loggedInUserId,
+                receiver_id:parseInt(val('receiverId')),
+                content:val('messageContent')
+            });
+            setVal('messageContent','');
+        }
+        function getActiveUsers(){
+            socket?.emit('get_active_users');
+        }
+        function getAllUsersSocket(){
+            socket?.emit('get_all_users');
         }
 
-        function sendMessage() {
-            if (!socket || !socket.connected) {
-                alert('Please log in first to send messages.');
-                return;
-            }
-            const receiverId = document.getElementById('receiverId').value;
-            const messageContent = document.getElementById('messageContent').value;
-
-            if (loggedInUserId && receiverId && messageContent) {
-                socket.emit('message', {
-                    sender_id: loggedInUserId,
-                    receiver_id: parseInt(receiverId),
-                    content: messageContent
-                });
-                document.getElementById('messageContent').value = ''; // Clear input
-            } else {
-                alert('Please provide sender ID, receiver ID, and message content.');
-            }
+        /* ───────── small utils ───────── */
+        async function jsonRequest(url,method,body,statusId){
+            const p = document.getElementById(statusId);
+            try{
+                const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+                const d=await r.json(); p.innerText=d.message; p.style.color=r.ok?'green':'red';
+                return {ok:r.ok,data:d};
+            }catch(e){ p.innerText='Request error'; p.style.color='red'; console.error(e); }
         }
-
-        function getActiveUsers() {
-            if (socket && socket.connected) {
-                socket.emit('get_active_users');
-            } else {
-                console.log("Socket not connected. Cannot get active users.");
-            }
+        function val(id){ return document.getElementById(id).value; }
+        function setVal(id,v){ document.getElementById(id).value=v; }
+        function setLoggedInBanner(){
+            document.getElementById('loggedInUser').innerText = loggedInUsername ?? 'None';
+            document.getElementById('loggedInUserId').innerText = loggedInUserId ?? 'None';
+        }
+        function logoutLocal(){
+            loggedInUserId=loggedInUsername=null;
+            setLoggedInBanner();
+            socket?.disconnect();
         }
     </script>
 </body>
