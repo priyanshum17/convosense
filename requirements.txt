@@ -1,1 +1,4 @@
-supabase
+flask
+flask-socketio
+flask-sqlalchemy
+eventlet

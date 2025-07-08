@@ -1,31 +1,25 @@
-from core.database.users import UserLedger, create, get_by_username
-from core.database.messages import Message, send, inbox
+from flask import Flask, render_template
+from flask_socketio import SocketIO
+from core.control.database import db
+from core.routes.auth import auth_bp
+from core.sockets.handlers import socketio
+from flask import send_from_directory
 
+app = Flask(__name__, static_folder='static')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = 'your_secret_key'
 
-def main():
-    test_user = UserLedger(username="test_user", password="secret123")
-    try:
-        created_user = create(test_user)
-        print("User created:", created_user)
-    except Exception as e:
-        print("User creation failed:", e)
-        created_user = get_by_username("test_user")
-        print("Loaded existing user:", created_user)
+db.init_app(app)
+socketio.init_app(app, cors_allowed_origins="*", async_mode='eventlet')
 
-    message = Message(
-        sender_id=created_user.user_id,
-        receiver_id=created_user.user_id,
-        content="Hello, this is a test message!",
-    )
+app.register_blueprint(auth_bp, url_prefix='/auth')
 
-    sent_msg = send(message)
-    print("✉️ Sent message:", sent_msg)
+@app.route('/')
+def index():
+    return send_from_directory('static', 'index.html')
 
-    inbox_messages = inbox(created_user.user_id)
-    print(f"📥 Inbox for {created_user.username}:")
-    for msg in inbox_messages:
-        print("-", msg)
-
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    socketio.run(app, debug=True, allow_unsafe_werkzeug=True, port=5005)

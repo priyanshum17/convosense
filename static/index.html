@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messaging App Test Interface</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        div { margin-bottom: 10px; padding: 10px; border: 1px solid #ccc; }
+        input, button { margin-right: 5px; padding: 8px; }
+        #messages, #activeUsers { border: 1px solid #eee; padding: 10px; height: 200px; overflow-y: scroll; }
+        .message { background-color: #f0f0f0; padding: 5px; margin-bottom: 5px; }
+        .active-user { color: green; font-weight: bold; }
+        .inactive-user { color: gray; }
+    </style>
+</head>
+<body>
+    <h1>Messaging App Test Interface</h1>
+
+    <h2>User Authentication</h2>
+    <div>
+        <h3>Register</h3>
+        <input type="text" id="registerUsername" placeholder="Username">
+        <input type="password" id="registerPassword" placeholder="Password">
+        <button onclick="registerUser()">Register</button>
+        <p id="registerStatus"></p>
+    </div>
+
+    <div>
+        <h3>Login</h3>
+        <input type="text" id="loginUsername" placeholder="Username">
+        <input type="password" id="loginPassword" placeholder="Password">
+        <button onclick="loginUser()">Login</button>
+        <p id="loginStatus"></p>
+        <p>Logged in as: <span id="loggedInUser">None</span> (ID: <span id="loggedInUserId">None</span>)</p>
+    </div>
+
+    <div>
+        <h3>Delete User</h3>
+        <input type="text" id="deleteUsername" placeholder="Username">
+        <input type="password" id="deletePassword" placeholder="Password">
+        <button onclick="deleteUser()">Delete</button>
+        <p id="deleteStatus"></p>
+    </div>
+
+    <h2>Messaging</h2>
+    <div>
+        <h3>Send Message</h3>
+        <input type="text" id="receiverId" placeholder="Receiver User ID">
+        <input type="text" id="messageContent" placeholder="Message Content">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <div>
+        <h3>Messages</h3>
+        <div id="messages"></div>
+    </div>
+
+    <h2>Active Users</h2>
+    <div>
+        <button onclick="getActiveUsers()">Refresh Active Users</button>
+        <ul id="activeUsers"></ul>
+    </div>
+
+    <script>
+        let socket;
+        let loggedInUserId = null;
+        let loggedInUsername = null;
+
+        function connectSocket() {
+            if (socket && socket.connected) {
+                socket.disconnect();
+            }
+            const userId = document.getElementById('loggedInUserId').innerText;
+            if (userId && userId !== 'None') {
+                socket = io.connect(window.location.origin, { query: `user_id=${userId}` });
+
+                socket.on('connect', () => {
+                    console.log('Socket connected!');
+                    getActiveUsers();
+                });
+
+                socket.on('disconnect', () => {
+                    console.log('Socket disconnected!');
+                });
+
+                socket.on('new_message', (data) => {
+                    const messagesDiv = document.getElementById('messages');
+                    const messageElem = document.createElement('div');
+                    messageElem.className = 'message';
+                    messageElem.innerText = `From ${data.sender_id} to ${data.receiver_id} (${new Date(data.timestamp).toLocaleTimeString()}): ${data.content}`;
+                    messagesDiv.appendChild(messageElem);
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                });
+
+                socket.on('message_sent', (data) => {
+                    const messagesDiv = document.getElementById('messages');
+                    const messageElem = document.createElement('div');
+                    messageElem.className = 'message';
+                    messageElem.style.backgroundColor = '#e0ffe0'; // Light green for sent messages
+                    messageElem.innerText = `You sent to ${data.receiver_id} (${new Date(data.timestamp).toLocaleTimeString()}): ${data.content}`;
+                    messagesDiv.appendChild(messageElem);
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                });
+
+                socket.on('user_status', (data) => {
+                    console.log(`User ${data.user_id} is now ${data.is_active ? 'active' : 'inactive'}`);
+                    getActiveUsers(); // Refresh active users list on status change
+                });
+
+                socket.on('active_users_list', (users) => {
+                    const activeUsersUl = document.getElementById('activeUsers');
+                    activeUsersUl.innerHTML = '';
+                    users.forEach(user => {
+                        const li = document.createElement('li');
+                        li.className = 'active-user';
+                        li.innerText = `${user.username} (ID: ${user.id})`;
+                        activeUsersUl.appendChild(li);
+                    });
+                });
+
+            } else {
+                console.log("Cannot connect socket: No user logged in.");
+            }
+        }
+
+        async function registerUser() {
+            const username = document.getElementById('registerUsername').value;
+            const password = document.getElementById('registerPassword').value;
+            const statusElem = document.getElementById('registerStatus');
+
+            try {
+                const response = await fetch('/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                statusElem.innerText = data.message;
+                statusElem.style.color = response.ok ? 'green' : 'red';
+            } catch (error) {
+                statusElem.innerText = 'Error registering user.';
+                statusElem.style.color = 'red';
+                console.error('Error:', error);
+            }
+        }
+
+        async function loginUser() {
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            const statusElem = document.getElementById('loginStatus');
+
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                statusElem.innerText = data.message;
+                statusElem.style.color = response.ok ? 'green' : 'red';
+
+                if (response.ok) {
+                    loggedInUserId = data.user_id;
+                    loggedInUsername = username;
+                    document.getElementById('loggedInUser').innerText = loggedInUsername;
+                    document.getElementById('loggedInUserId').innerText = loggedInUserId;
+                    connectSocket(); // Connect socket after successful login
+                } else {
+                    loggedInUserId = null;
+                    loggedInUsername = null;
+                    document.getElementById('loggedInUser').innerText = 'None';
+                    document.getElementById('loggedInUserId').innerText = 'None';
+                    if (socket) socket.disconnect();
+                }
+            } catch (error) {
+                statusElem.innerText = 'Error logging in.';
+                statusElem.style.color = 'red';
+                console.error('Error:', error);
+            }
+        }
+
+        async function deleteUser() {
+            const username = document.getElementById('deleteUsername').value;
+            const password = document.getElementById('deletePassword').value;
+            const statusElem = document.getElementById('deleteStatus');
+
+            try {
+                const response = await fetch('/auth/delete_user', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                statusElem.innerText = data.message;
+                statusElem.style.color = response.ok ? 'green' : 'red';
+                if (response.ok && username === loggedInUsername) {
+                    loggedInUserId = null;
+                    loggedInUsername = null;
+                    document.getElementById('loggedInUser').innerText = 'None';
+                    document.getElementById('loggedInUserId').innerText = 'None';
+                    if (socket) socket.disconnect();
+                }
+            } catch (error) {
+                statusElem.innerText = 'Error deleting user.';
+                statusElem.style.color = 'red';
+                console.error('Error:', error);
+            }
+        }
+
+        function sendMessage() {
+            if (!socket || !socket.connected) {
+                alert('Please log in first to send messages.');
+                return;
+            }
+            const receiverId = document.getElementById('receiverId').value;
+            const messageContent = document.getElementById('messageContent').value;
+
+            if (loggedInUserId && receiverId && messageContent) {
+                socket.emit('message', {
+                    sender_id: loggedInUserId,
+                    receiver_id: parseInt(receiverId),
+                    content: messageContent
+                });
+                document.getElementById('messageContent').value = ''; // Clear input
+            } else {
+                alert('Please provide sender ID, receiver ID, and message content.');
+            }
+        }
+
+        function getActiveUsers() {
+            if (socket && socket.connected) {
+                socket.emit('get_active_users');
+            } else {
+                console.log("Socket not connected. Cannot get active users.");
+            }
+        }
+    </script>
+</body>
+</html>
